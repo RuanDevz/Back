@@ -1,15 +1,14 @@
-
 const express = require('express');
 const cors = require('cors');
-const db = require('./models');
-const { Pool } = require('pg');
-
+const db = require('./models'); // Sequelize
 require('dotenv').config();
 
 const app = express();
 
-app.set('trust proxy', 1);
+// Trust proxy seguro: true apenas em produção (Vercel, Heroku)
+app.set('trust proxy', process.env.NODE_ENV === 'production');
 
+// CORS
 app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   credentials: true
@@ -24,16 +23,15 @@ app.use((req, res, next) => {
   if (blockedDomains.some(domain => referer.includes(domain) || origin.includes(domain))) {
     return res.status(403).json({ message: 'You are blocked' });
   }
-
   next();
 });
 
-// Keep console output consistent (sua versão anterior)
+// Keep console output consistent
 console.log = (...args) => process.stdout.write(args.join(' ') + '\n');
 console.error = (...args) => process.stderr.write(args.join(' ') + '\n');
 
-// Rotas (imports)
-const webhookRouter = require('./routes/stripewebhook'); // único import do webhook
+// Rotas
+const webhookRouter = require('./routes/stripewebhook');
 const userRouter = require('./routes/user');
 const AsianRouter = require('./routes/AsianContent');
 const payRouter = require('./routes/payment');
@@ -61,17 +59,14 @@ const VipBannedRouter = require('./routes/VipBannedContent');
 const VipUnknownRouter = require('./routes/VipUnknownContent');
 const universalSearchRouter = require('./routes/UniversalSearch');
 
-// Seção: body parser com exceção do webhook (mantendo o raw for webhook)
+// Body parser (exceção do webhook)
 app.use((req, res, next) => {
-  if (req.originalUrl === '/webhook') {
-    // webhook route handles raw body itself (seu router deve fazer isso)
-    return next();
-  }
+  if (req.originalUrl === '/webhook') return next();
   return express.json()(req, res, next);
 });
 
-// ROTAS -> manter ordem e middlewares
-app.use('/webhook', webhookRouter); // webhook primeiro para garantir raw body
+// ROTAS
+app.use('/webhook', webhookRouter);
 app.use('/auth', userRouter);
 app.use('/auth', authRoutes);
 app.use('/auth', renewVipRouter);
@@ -97,7 +92,7 @@ app.use('/vip-unknowncontent', checkApiKey, VipUnknownRouter);
 app.use('/universal-search', checkApiKey, universalSearchRouter);
 app.use('/recommendations', recommendationsRouter);
 
-// Limiter (mantido)
+// Limiter
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -105,27 +100,19 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Bloqueio de bots e requisições suspeitas (mantido)
+// Bloqueio de bots
 app.use((req, res, next) => {
   const ua = req.headers['user-agent'] || '';
-  if (/curl|wget|bot|spider/i.test(ua)) {
-    return res.status(403).send('Forbidden');
-  }
+  if (/curl|wget|bot|spider/i.test(ua)) return res.status(403).send('Forbidden');
   next();
 });
 
-// Bloqueios por URL suspeita (mantido)
+// Bloqueios por URL suspeita
 app.use((req, res, next) => {
   const url = decodeURIComponent(req.originalUrl || '');
   const bloqueios = [
-    /\.bak$/i,
-    /\.old$/i,
-    /nice ports/i,
-    /trinity/i,
-    /\.git/i,
-    /\.env/i,
-    /wp-admin/i,
-    /phpmyadmin/i
+    /\.bak$/i, /\.old$/i, /nice ports/i, /trinity/i,
+    /\.git/i, /\.env/i, /wp-admin/i, /phpmyadmin/i
   ];
 
   for (const pattern of bloqueios) {
@@ -137,24 +124,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// ------------------------------------------------------
-// Inicialização segura do Sequelize (com retries)
-// ------------------------------------------------------
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-});
-
-app.set('trust proxy', true); //
-pool.connect((err, client, done) => {
-  if (err) {
-    console.error('Erro ao conectar ao banco de dados:', err);
-    return;
-  }
-  console.log('Conexão bem-sucedida ao banco de dados');
-  done();
-});
-
-// Sequelize
+// -------------------------------
+// Conexão Sequelize
+// -------------------------------
 db.sequelize.authenticate()
   .then(() => {
     console.log('Conexão com o banco de dados Sequelize estabelecida com sucesso.');
